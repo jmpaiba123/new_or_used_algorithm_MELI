@@ -1,6 +1,8 @@
 
 import pandas as pd
 import numpy as np
+from scipy.stats import boxcox
+from sklearn.preprocessing import PowerTransformer
 
 # Step 1: Clean the warranty column
 def clean_warranty(warranty):
@@ -19,11 +21,32 @@ def clean_warranty(warranty):
             return 'otros'
     elif 'año' in warranty:
         return '12 meses'
-    elif 'si' in warranty:
-        return 'sí'
+    elif 'sí' in warranty:
+        return 'si'
+    elif 'con' in warranty:
+        return 'si'
     elif 'sin garantía' in warranty:
         return 'sin garantía'
     elif 'missing' in warranty:
+        return 'missing'
+    else:
+        return 'otros'
+    
+# Step 2: Clean the title column
+def clean_title(title):
+    if pd.isnull(title):
+        return 'missing'
+    # Normalize different variations of the same term
+    title = title.lower()
+    if 'nuevo' in title:
+        return 'new'
+    elif 'new' in title:
+        return 'new'
+    elif 'usado' in title:
+        return 'used'
+    elif 'used' in title:
+        return 'used'
+    elif 'missing' in title:
         return 'missing'
     else:
         return 'otros'
@@ -89,6 +112,15 @@ def replace_rare_values(df, column, rare_values):
     
     return df
 
+# Function to remove outliers using the IQR method
+def remove_outliers(df, column):
+    Q1 = df[column].quantile(0.25)
+    Q3 = df[column].quantile(0.75)
+    IQR = Q3 - Q1
+    lower_bound = Q1 - 1.5 * IQR
+    upper_bound = Q3 + 1.5 * IQR
+    return df[(df[column] >= lower_bound) & (df[column] <= upper_bound)]
+
 def create_transformed_columns(df, column):
     """
     Create new columns in a DataFrame based on transformations (square, square root, log) of a specified column.
@@ -104,11 +136,68 @@ def create_transformed_columns(df, column):
     df[f'{column}_square'] = df[column] ** 2
 
     df[f'{column}_cube'] = df[column] ** 3
+
+    df[f'{column}_fourth'] = df[column] ** 4
     
     # Square root transformation
     df[f'{column}_sqrt'] = np.sqrt(df[column])
     
     # Logarithm transformation (handling non-positive values)
     df[f'{column}_log'] = np.log(df[column].replace(0, np.nan))  # Replace 0 with NaN to avoid log(0) errors
+
+    # Reciprocal transformation
+    df[f'{column}_reciprocal'] = 1 / df[column] 
+    df[f'{column}_reciprocal'] = df[f'{column}_reciprocal'].replace([np.inf, -np.inf], 0)
+
+    # Hyperbolic Tangent (Tanh) Transformation
+    df[f'{column}_tanh'] = np.tanh(df[column])
+
+    # Inverse Square Root Transformation
+    df[f'{column}_inverse_sqrt'] = 1 / np.sqrt(df[column])
+    df[f'{column}_inverse_sqrt'] = df[f'{column}_inverse_sqrt'].replace([np.inf, -np.inf], 0)
+
+    # Box-Cox Transformation (only if all values are positive)
+    if (df[column] > 0).all():
+        df[f'{column}_boxcox'], _ = boxcox(df[column])
+    
+    # Yeo-Johnson Transformation
+    pt = PowerTransformer(method='yeo-johnson')
+    df[f'{column}_yeojohnson'] = pt.fit_transform(df[[column]])
+
+    # Binning (Discretization)
+    df[f'{column}_bin'] = pd.cut(df[column], bins=10, labels=False)
+
+    # Sigmoid Transformation
+    df[f'{column}_sigmoid'] = 1 / (1 + np.exp(-df[column]))
+
+    # Arcsine Transformation
+    df[f'{column}_arcsin'] = np.arcsin(df[column])
+
+
+    # Hyperbolic Tangent (Tanh) Transformation
+    df[f'{column}_tanh'] = np.tanh(df[column])
+    
+    # Inverse Square Root Transformation
+    df[f'{column}_inverse_sqrt'] = 1 / np.sqrt(df[column])
+    df[f'{column}_inverse_sqrt'] = df[f'{column}_inverse_sqrt'].replace([np.inf, -np.inf], 0)
+
+    # Box-Cox Transformation (only if all values are positive)
+    if (df[column] > 0).all():
+        df[f'{column}_boxcox'], _ = boxcox(df[column])
+        df[f'{column}_boxcox'] = df[f'{column}_boxcox'].replace([np.inf, -np.inf], 0)
+    
+    # Yeo-Johnson Transformation
+    pt = PowerTransformer(method='yeo-johnson')
+    df[f'{column}_yeojohnson'] = pt.fit_transform(df[[column]])
+    df[f'{column}_yeojohnson'] = df[f'{column}_yeojohnson'].replace([np.inf, -np.inf], 0)
+
+    # Binning (Discretization)
+    df[f'{column}_bin'] = pd.cut(df[column], bins=10, labels=False)
+
+    # Sigmoid Transformation
+    df[f'{column}_sigmoid'] = 1 / (1 + np.exp(-df[column]))
+
+    # Arcsine Transformation
+    df[f'{column}_arcsin'] = np.arcsin(df[column])
     
     return df
