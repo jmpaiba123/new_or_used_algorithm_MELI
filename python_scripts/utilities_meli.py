@@ -3,6 +3,10 @@ import pandas as pd
 import numpy as np
 from scipy.stats import boxcox
 from sklearn.preprocessing import PowerTransformer
+import re
+import unicodedata
+import nltk
+from nltk.corpus import stopwords
 
 # Step 1: Clean the warranty column
 def clean_warranty(warranty):
@@ -25,15 +29,45 @@ def clean_warranty(warranty):
         return 'si'
     elif 'con' in warranty:
         return 'si'
+    elif 'con garantía' in warranty:
+        return 'si'
+    elif 'con garantia' in warranty:
+        return 'si'
     elif 'sin garantía' in warranty:
         return 'sin garantía'
     elif 'missing' in warranty:
         return 'missing'
     else:
         return 'otros'
+
+# Define keywords to classify titles
+used_keywords = ['usado', 'segunda mano', 'pre-owned', 'segunda', 'seminuevo', 'impecable', 'como nuevo', 'excelente estado',  
+    'buen estado', 'en buen estado', 'estado bueno', 
+    'usado buen estado', 'usado excelente estado', 
+    'remanufacturado', 'refabricado'  ]
+new_keywords = [  'nuevo', 'nueva', 'a estrenar', 'brand new', 'nuevo sin usar',  # Nuevo
+    'nuevos', 'nuevas', 'originales',  # Plural y otros sinónimos
+    'nuevo garantizado', 'nuevo en caja', 'nuevo sellado',  # Con garantía de nuevo
+    'nuevo con etiqueta', 'nuevo con garantía'  ]
+
+# Function to classify titles
+def classify_condition(title):
+
+    if title is None or not isinstance(title, str):
+        return 'missing' 
     
+    title_lower = title.lower()  # Convert to lowercase for case insensitivity
+    for keyword in used_keywords:
+        if keyword in title_lower:
+            return 'used'
+    for keyword in new_keywords:
+        if keyword in title_lower:
+            return 'new'
+    return 'unknown'  # Return 'unknown' if no keywords found
+
+
 # Step 2: Clean the title column
-def clean_title(title):
+def title_condition(title):
     if pd.isnull(title):
         return 'missing'
     # Normalize different variations of the same term
@@ -42,6 +76,10 @@ def clean_title(title):
         return 'new'
     elif 'new' in title:
         return 'new'
+    elif 'sin uso' in title:
+        return 'new'
+    elif 'con uso' in title:
+        return 'used'
     elif 'usado' in title:
         return 'used'
     elif 'used' in title:
@@ -51,18 +89,51 @@ def clean_title(title):
     else:
         return 'otros'
 
-# Step 1: Define a function to extract the first two words
-def extract_first_two_words(title):
+# Download stopwords data if not already downloaded
+nltk.download('stopwords')
+# Get the list of English stopwords
+stop_words = set(stopwords.words('spanish'))
+
+def remove_accents(input_str):
+    """
+    Remove accents (tildes) from characters in the input string.
+    """
+    nfkd_form = unicodedata.normalize('NFKD', input_str)
+    return ''.join([c for c in nfkd_form if not unicodedata.combining(c)])
+
+def clean_title(title):
+    """
+    Clean title by removing special characters, converting to lowercase, and removing accents.
+    """
     if pd.isnull(title) or title == '':
         return ''
-    words = title.split()
+    title = re.sub(r'[^\w\s]', '', title)  # Remove special characters
+    title = remove_accents(title.lower().strip())  # Remove accents and convert to lowercase
+    return title
+
+def extract_first_two_words(title):
+    """
+    Extract the first two non-stopwords from the cleaned title.
+    """
+    cleaned_title = clean_title(title)
+    words = [word for word in cleaned_title.split() if word not in stop_words]
     return ' '.join(words[:2])
 
-    # Step 1: Define a function to extract the first word
 def extract_first_word(title):
-    if pd.isnull(title) or title == '':
-        return ''
-    return title.split()[0]
+    """
+    Extract the first non-stopword from the cleaned title.
+    """
+    cleaned_title = clean_title(title)
+    words = [word for word in cleaned_title.split() if word not in stop_words]
+    return words[0] if words else ''
+
+def extract_first_three_words(title):
+    """
+    Extract the first three non-stopwords from the cleaned title.
+    """
+    cleaned_title = clean_title(title)
+    words = [word for word in cleaned_title.split() if word not in stop_words]
+    return ' '.join(words[:3])
 
 def calculate_group_stats(df, group_column, value_column):
     """
@@ -94,6 +165,15 @@ def calculate_group_stats(df, group_column, value_column):
     
     return df
 
+# Function to remove outliers using the IQR method
+def remove_outliers(df, column):
+    Q1 = df[column].quantile(0.25)
+    Q3 = df[column].quantile(0.75)
+    IQR = Q3 - Q1
+    lower_bound = Q1 - 1.5 * IQR
+    upper_bound = Q3 + 1.5 * IQR
+    return df[(df[column] >= lower_bound) & (df[column] <= upper_bound)]
+
 
 def replace_rare_values(df, column, rare_values):
     """
@@ -123,20 +203,22 @@ def remove_outliers(df, column):
 
 def create_transformed_columns(df, column):
     """
-    Create new columns in a DataFrame based on transformations (square, square root, log) of a specified column.
+    Create new columns in a DataFrame based on transformations (square, square root, logarithm) of a specific column.
 
     Parameters:
     - df: DataFrame containing the data.
     - column: Name of the column for which transformations are applied.
 
     Returns:
-    - DataFrame with additional columns for square, square root, and log transformations.
+    - DataFrame with additional columns for each specified transformation.
     """
     # Square transformation
     df[f'{column}_square'] = df[column] ** 2
 
+    # Cube transformation
     df[f'{column}_cube'] = df[column] ** 3
 
+    # Fourth power transformation
     df[f'{column}_fourth'] = df[column] ** 4
     
     # Square root transformation
@@ -146,7 +228,7 @@ def create_transformed_columns(df, column):
     df[f'{column}_log'] = np.log(df[column].replace(0, np.nan))  # Replace 0 with NaN to avoid log(0) errors
 
     # Reciprocal transformation
-    df[f'{column}_reciprocal'] = 1 / df[column] 
+    df[f'{column}_reciprocal'] = 1 / df[column]
     df[f'{column}_reciprocal'] = df[f'{column}_reciprocal'].replace([np.inf, -np.inf], 0)
 
     # Hyperbolic Tangent (Tanh) Transformation
@@ -159,37 +241,13 @@ def create_transformed_columns(df, column):
     # Box-Cox Transformation (only if all values are positive)
     if (df[column] > 0).all():
         df[f'{column}_boxcox'], _ = boxcox(df[column])
-    
-    # Yeo-Johnson Transformation
-    pt = PowerTransformer(method='yeo-johnson')
-    df[f'{column}_yeojohnson'] = pt.fit_transform(df[[column]])
-
-    # Binning (Discretization)
-    df[f'{column}_bin'] = pd.cut(df[column], bins=10, labels=False)
-
-    # Sigmoid Transformation
-    df[f'{column}_sigmoid'] = 1 / (1 + np.exp(-df[column]))
-
-    # Arcsine Transformation
-    df[f'{column}_arcsin'] = np.arcsin(df[column])
-
-
-    # Hyperbolic Tangent (Tanh) Transformation
-    df[f'{column}_tanh'] = np.tanh(df[column])
-    
-    # Inverse Square Root Transformation
-    df[f'{column}_inverse_sqrt'] = 1 / np.sqrt(df[column])
-    df[f'{column}_inverse_sqrt'] = df[f'{column}_inverse_sqrt'].replace([np.inf, -np.inf], 0)
-
-    # Box-Cox Transformation (only if all values are positive)
-    if (df[column] > 0).all():
-        df[f'{column}_boxcox'], _ = boxcox(df[column])
         df[f'{column}_boxcox'] = df[f'{column}_boxcox'].replace([np.inf, -np.inf], 0)
     
-    # Yeo-Johnson Transformation
-    pt = PowerTransformer(method='yeo-johnson')
-    df[f'{column}_yeojohnson'] = pt.fit_transform(df[[column]])
-    df[f'{column}_yeojohnson'] = df[f'{column}_yeojohnson'].replace([np.inf, -np.inf], 0)
+    # Yeo-Johnson Transformation (commented out due to issues with reshape)
+    #pt = PowerTransformer(method='yeo-johnson')
+    #df[f'{column}_yeojohnson'] = pt.fit_transform(df[[column]])
+    #df[f'{column}_yeojohnson'] = df[f'{column}_yeojohnson'].reshape(-1)  # Flatten to a 1D array
+    #df[f'{column}_yeojohnson'] = df[f'{column}_yeojohnson'].replace([np.inf, -np.inf], 0)
 
     # Binning (Discretization)
     df[f'{column}_bin'] = pd.cut(df[column], bins=10, labels=False)
