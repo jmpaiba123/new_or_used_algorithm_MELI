@@ -27,18 +27,31 @@ import json
 import os
 import pandas as pd
 import sys
+
+# Assuming you have already run predict_model and stored the result in `a`
+from sklearn.metrics import accuracy_score, roc_auc_score, recall_score, precision_score, f1_score, cohen_kappa_score, matthews_corrcoef
+
 module_path = os.path.abspath(os.path.join('/Users/juanmanuelpaiba/Documents/Juan_Paiba/new_or_used_algorithm_MELI/', 'python_scripts'))
 if module_path not in sys.path:
     sys.path.append(module_path)
 import utilities_meli # type: ignore
 from feature_engine.encoding import RareLabelEncoder
 
+# Libreriras para modelado y AUTOML
+# ==============================================================================
+from pycaret.datasets import get_data
+from pycaret.classification import *
+from pycaret.classification import ClassificationExperiment
+#from pycaret.utils import check_metric
+from imblearn.over_sampling import *
+import os
+
 os.chdir(path="/Users/juanmanuelpaiba/Documents/Juan_Paiba/new_or_used_algorithm_MELI")
 # You can safely assume that `build_dataset` is correctly implemented
 def build_dataset():
     data = [json.loads(x) for x in open("data/Inputs/MLA_100k_checked_v3.jsonlines")]
     target = lambda x: x.get("condition")
-    N = -10000
+    N = -80000
     X_train = data[:N]
     X_test = data[N:]
     y_train = [target(x) for x in X_train]
@@ -166,6 +179,7 @@ for column in columns_to_group:
     df_products_00 = utilities_meli.calculate_group_stats(df_products_00, column, value_column_2)
 
 
+# variables categóricas a transformar
 var_dummies =['listing_type_id', 'buying_mode', 'category_id', 'currency_id',
             'status', 'video_id', 'country_name', 'country_id', 'state_name',
             'state_id', 'city_id', 'mode', 'descrip_mdo_0', 'id_mdo_0',
@@ -193,6 +207,7 @@ df_products_01 = pd.get_dummies(df_products_01)
 df_products_01 = df_products_01.fillna(0)
 # Convertir True y False a 1 y 0
 df_products_01 = df_products_01.astype(int)
+df_products_01['subtitle'] = 0
 
 df_products_01 = utilities_meli.create_transformed_columns(df_products_01,'price')
 df_products_01 = utilities_meli.create_transformed_columns(df_products_01,'initial_quantity')
@@ -212,3 +227,29 @@ df_products_01['price_4_x_initial_quantity'] = df_products_01['price_fourth']*df
 
 print(df_products_01.shape)
 
+ML_new_or_used = load_model("data/Outputs/Modelos/ML_CLassification_condition_2024_06_16")
+print(load_model("data/Outputs/Modelos/ML_CLassification_condition_2024_06_16"))
+
+
+a = predict_model(ML_new_or_used, data=df_products_01, raw_score=True)
+a['condition'] = y_test
+# Reemplazar 'new' por 1 y 'used' por 0 en la df_ajust
+a['target'] = a['condition'].replace({'new': 1, 'used': 0})
+
+# Compute evaluation metrics
+accuracy = accuracy_score(a['target'], a['prediction_label'])
+auc = roc_auc_score(a['target'], a['prediction_score_1'])
+recall = recall_score(a['target'], a['prediction_label'], average='binary')
+precision = precision_score(a['target'], a['prediction_label'], average='binary')
+f1 = f1_score(a['target'], a['prediction_label'], average='binary')
+kappa = cohen_kappa_score(a['target'], a['prediction_label'])
+mcc = matthews_corrcoef(a['target'], a['prediction_label'])
+
+# Print or store the metrics
+print(f"Accuracy: {accuracy:.4f}")
+print(f"AUC: {auc:.4f}")
+print(f"Recall: {recall:.4f}")
+print(f"Precision: {precision:.4f}")
+print(f"F1: {f1:.4f}")
+print(f"Kappa: {kappa:.4f}")
+print(f"MCC: {mcc:.4f}")
